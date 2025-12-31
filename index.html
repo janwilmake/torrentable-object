@@ -197,14 +197,44 @@
             font-weight: bold;
         }
 
-        .magnet-link {
-            background: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAAdgAAAHYBTnsmCAAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAFYSURBVDiNpZM9SwNBEIafgwQSCxsLwcJCG1sLG1sLbSy0sdDGQhsLbSy0sdDGQhsLbSy0sdDGQhsLbSy0sdDGQhsLbSy0sdDGQhsLbSy0sVBICBYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYW') no-repeat;
-            background-size: 16px 16px;
-            width: 16px;
-            height: 16px;
-            display: inline-block;
+        .magnet-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .magnet-link,
+        .copy-link {
             cursor: pointer;
-            title: 'Magnet link';
+            color: #8B7355;
+            text-decoration: none;
+            font-size: 16px;
+            transition: opacity 0.2s;
+        }
+
+        .magnet-link:hover,
+        .copy-link:hover {
+            opacity: 0.7;
+        }
+
+        .magnet-link {
+            title: 'Open magnet link';
+        }
+
+        .copy-link {
+            title: 'Copy magnet link';
+        }
+
+        .copy-feedback {
+            font-size: 10px;
+            color: #008000;
+            font-style: italic;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .copy-feedback.show {
+            opacity: 1;
         }
 
         .size-cell {
@@ -276,6 +306,11 @@
             .results-table th,
             .results-table td {
                 padding: 4px;
+            }
+
+            .magnet-actions {
+                flex-direction: column;
+                gap: 4px;
             }
         }
     </style>
@@ -412,21 +447,57 @@
             return `magnet:?xt=urn:btih:${infoHash}&dn=${encodeURIComponent(name)}&${trackerParams}`;
         }
 
-        // Copy magnet link and open it
-        function handleMagnetClick(infoHash, name) {
+        // Open magnet link
+        function handleMagnetOpen(infoHash, name) {
+            const magnetLink = generateMagnetLink(infoHash, name);
+            window.location.href = magnetLink;
+        }
+
+        // Copy magnet link to clipboard
+        async function handleMagnetCopy(infoHash, name, feedbackElement) {
             const magnetLink = generateMagnetLink(infoHash, name);
 
-            // Try to copy to clipboard
-            if (navigator.clipboard) {
-                navigator.clipboard.writeText(magnetLink).then(() => {
-                    console.log('Magnet link copied to clipboard');
-                }).catch(err => {
-                    console.error('Failed to copy magnet link:', err);
-                });
-            }
+            try {
+                await navigator.clipboard.writeText(magnetLink);
 
-            // Open magnet link
-            window.location.href = magnetLink;
+                // Show feedback
+                feedbackElement.textContent = 'Copied!';
+                feedbackElement.classList.add('show');
+
+                setTimeout(() => {
+                    feedbackElement.classList.remove('show');
+                }, 2000);
+            } catch (err) {
+                console.error('Failed to copy magnet link:', err);
+
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = magnetLink;
+                textArea.style.position = 'fixed';
+                textArea.style.left = '-999999px';
+                document.body.appendChild(textArea);
+                textArea.select();
+
+                try {
+                    document.execCommand('copy');
+                    feedbackElement.textContent = 'Copied!';
+                    feedbackElement.classList.add('show');
+
+                    setTimeout(() => {
+                        feedbackElement.classList.remove('show');
+                    }, 2000);
+                } catch (err2) {
+                    console.error('Fallback copy failed:', err2);
+                    feedbackElement.textContent = 'Copy failed';
+                    feedbackElement.classList.add('show');
+
+                    setTimeout(() => {
+                        feedbackElement.classList.remove('show');
+                    }, 2000);
+                }
+
+                document.body.removeChild(textArea);
+            }
         }
 
         // Create torrent row HTML
@@ -436,7 +507,7 @@
             const nameCell = document.createElement('td');
             nameCell.innerHTML = `
                 <div class="torrent-name">
-                    <a href="#" onclick="handleMagnetClick('${torrent.info_hash}', '${torrent.name.replace(/'/g, "\\'")}'); return false;">${torrent.name}</a>
+                    <a href="#" onclick="handleMagnetOpen('${torrent.info_hash}', '${torrent.name.replace(/'/g, "\\'")}'); return false;">${torrent.name}</a>
                 </div>
                 <div class="torrent-details">
                     Uploaded ${formatDate(torrent.added)}, Size ${formatBytes(torrent.size)}, Files ${torrent.num_files}
@@ -456,11 +527,18 @@
             sizeCell.textContent = formatBytes(torrent.size);
 
             const uploaderCell = document.createElement('td');
+            const feedbackId = `feedback-${torrent.info_hash}`;
             uploaderCell.innerHTML = `
                 ${torrent.username}<br>
-                <span onclick="handleMagnetClick('${torrent.info_hash}', '${torrent.name.replace(/'/g, "\\'")}'); return false;" 
-                      style="cursor: pointer; color: #8B7355; text-decoration: underline;" 
-                      title="Get magnet link">🧲</span>
+                <div class="magnet-actions">
+                    <span onclick="handleMagnetOpen('${torrent.info_hash}', '${torrent.name.replace(/'/g, "\\'")}'); return false;" 
+                          class="magnet-link" 
+                          title="Open magnet link">🧲</span>
+                    <span onclick="handleMagnetCopy('${torrent.info_hash}', '${torrent.name.replace(/'/g, "\\'")}', document.getElementById('${feedbackId}')); return false;" 
+                          class="copy-link" 
+                          title="Copy magnet link">📋</span>
+                    <span id="${feedbackId}" class="copy-feedback"></span>
+                </div>
             `;
 
             tr.appendChild(nameCell);
@@ -566,8 +644,9 @@
             }
         });
 
-        // Make handleMagnetClick globally accessible
-        window.handleMagnetClick = handleMagnetClick;
+        // Make functions globally accessible
+        window.handleMagnetOpen = handleMagnetOpen;
+        window.handleMagnetCopy = handleMagnetCopy;
 
         // Check for existing query parameters on page load
         window.addEventListener('load', () => {
